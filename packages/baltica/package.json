@@ -1,0 +1,14 @@
+{
+  "name": "baltica",
+  "version": "0.0.1",
+  "description": "Core baltica package",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist"
+  },
+  "files": [
+    "dist"
+  ]
+}
