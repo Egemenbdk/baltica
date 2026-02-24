@@ -1,1 +1,3 @@
-export const name = "@baltica/raknet";
+export * from "./shared"
+export * from "./client"
+export * from "./server"

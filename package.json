@@ -7,9 +7,10 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present",
-    "clean": "npm run clean --workspaces --if-present"
+    "build": "bun --filter '*' build",
+    "test": "bun --filter '*' test",
+    "lint": "bun --filter '*' lint",
+    "clean": "bun --filter '*' clean",
+    "watch": "tsc --build --watch"
   }
 }

@@ -1,1 +1,1 @@
-export const name = "baltica";
+export * from "./client";
