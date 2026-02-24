@@ -12,6 +12,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@baltica/utils": "*",
     "@serenityjs/binarystream": "^3.1.0"

@@ -1,0 +1,51 @@
+name: Build & Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run build
+
+      - name: Publish @baltica/utils
+        run: npm publish --access public
+        working-directory: packages/utils
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @baltica/auth
+        run: npm publish --access public
+        working-directory: packages/auth
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish @baltica/raknet
+        run: npm publish --access public
+        working-directory: packages/raknet
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Publish baltica
+        run: npm publish --access public
+        working-directory: packages/baltica
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
