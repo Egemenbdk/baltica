@@ -237,6 +237,7 @@ export class NetworkSession extends Emitter<NetworkEvents> {
    }
 
    tick(): void {
+      if (this.status === Status.Disconnected) return;
       const now = Date.now();
       if (this.offlineRetry) {
          const r = this.offlineRetry;

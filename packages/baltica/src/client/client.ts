@@ -49,11 +49,15 @@ export class Client extends Emitter<ClientEvents> {
       await this.raknet.connect();
       this.requestNetworkSettings();
 
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
          this.on("SetLocalPlayerAsInitializedPacket", () => {
             resolve();
             this.emit("spawn");
             this.emit("connect");
+         });
+
+         this.on("disconnect", (reason) => {
+            reject(new Error(`Disconnected during login: ${reason}`));
          });
       });
    }
@@ -166,8 +170,16 @@ export class Client extends Emitter<ClientEvents> {
       });
 
       this.on("DisconnectPacket" as PacketNames, (pkt: any) => {
-         Logger.error("Disconnected:", JSON.stringify(pkt, null, 2));
+         const reason = pkt?.message?.message ?? pkt?.message ?? "Unknown reason";
+         Logger.info(`Disconnected by server: ${reason}`);
+         this.close();
+         this.emit("disconnect", String(reason));
       });
+   }
+
+   public close(): void {
+      try { this.raknet.close(); } catch {}
+      this.removeAllListeners();
    }
 
    private async authenticate(): Promise<void> {

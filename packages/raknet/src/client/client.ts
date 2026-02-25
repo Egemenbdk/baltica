@@ -120,8 +120,16 @@ export class Client extends Emitter<ClientEvents> {
    }
 
    public close(): void {
-      if (this.tickInterval) clearInterval(this.tickInterval);
-      if (this.relay) this.relay.close();
-      else this.socket.close();
+      if (this.tickInterval) {
+         clearInterval(this.tickInterval);
+         this.tickInterval = undefined;
+      }
+      this.network.status = Status.Disconnected;
+      this.network.send = () => {};
+      this.network.removeAllListeners();
+      try {
+         if (this.relay) this.relay.close();
+         else if (this.socket) this.socket.close();
+      } catch {}
    }
 }

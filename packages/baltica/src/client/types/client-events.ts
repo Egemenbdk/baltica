@@ -6,4 +6,5 @@ export type ClientEvents = {
 } & {
    spawn: [],
    connect: [],
+   disconnect: [reason: string],
 };

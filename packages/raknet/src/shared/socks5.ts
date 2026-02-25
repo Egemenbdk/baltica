@@ -55,18 +55,27 @@ export async function createSocks5Relay(
       if (messageHandler) messageHandler(payload, addr, port);
    });
 
-   tcp.on("close", () => udp.close());
+   let closed = false;
+
+   tcp.on("close", () => {
+      if (closed) return;
+      closed = true;
+      try { udp.close(); } catch {}
+   });
 
    return {
       socket: udp,
       tcp,
       send(data: Buffer, targetAddress: string, targetPort: number) {
+         if (closed) return;
          const header = buildUdpHeader(targetAddress, targetPort);
          const packet = Buffer.concat([header, data]);
          udp.send(packet, relay.port, relay.address);
       },
       close() {
-         udp.close();
+         if (closed) return;
+         closed = true;
+         try { udp.close(); } catch {}
          tcp.destroy();
       },
       onMessage(handler) {
