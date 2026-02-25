@@ -178,7 +178,7 @@ export class Client extends Emitter<ClientEvents> {
    }
 
    public close(): void {
-      try { this.raknet.close(); } catch {}
+      try { this.raknet.close(); } catch { }
       this.removeAllListeners();
    }
 
