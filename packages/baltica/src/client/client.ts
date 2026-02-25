@@ -1,7 +1,7 @@
 import { Priority, Client as Raknet } from "@baltica/raknet";
 import { Emitter } from "@baltica/utils";
 import { ClientEvents, ClientOptions, defaultClientOptions, LoginData, PlayerProfile, createDefaultPayload } from "./types";
-import { Auth } from "@baltica/auth";
+import { Auth, AuthResult } from "@baltica/auth";
 import { Logger } from "@baltica/utils";
 import { PacketEncryptor } from "../shared/serializer/packet-encryptor";
 import { PacketCompressor } from "../shared/serializer/packet-compressor";
@@ -237,7 +237,7 @@ export class Client extends Emitter<ClientEvents> {
          });
 
          auth.on("login", async (result) => {
-            console.log(result.profile)
+            Logger.info(`Logged in as §a${result.profile.username}§r`);
             this.applyAuthResult(result);
             resolve();
          });
@@ -247,13 +247,12 @@ export class Client extends Emitter<ClientEvents> {
       });
    }
 
-   private async applyAuthResult(result: any): Promise<void> {
-      const profile = result.profile ?? {};
-      const gamertag = profile.username || this.options.username;
-      const xuid = profile.xuid || "";
-      const uuid = profile.uuid || LoginData.nextUUID(gamertag);
+   private async applyAuthResult(result: AuthResult): Promise<void> {
+      const gamertag = result.profile.username || this.options.username;
+      const xuid = result.profile.xuid || "";
+      const uuid = result.profile.uuid || LoginData.nextUUID(gamertag);
 
-      this.profile = { name: gamertag, uuid, xuid };
+      this.profile = { name: result.profile.username, uuid, xuid };
       this.loginData.payload = createDefaultPayload(this.options, this.profile);
       if (this.options.skinData) {
          Object.assign(this.loginData.payload, this.options.skinData);
