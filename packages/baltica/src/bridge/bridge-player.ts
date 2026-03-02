@@ -53,6 +53,8 @@ export class BridgePlayer extends Emitter<BridgePlayerEvents> {
 
       this.client.on("DisconnectPacket" as any, () => this.bridge.disconnect(this));
       this.player.on("DisconnectPacket" as any, () => this.bridge.disconnect(this));
+      this.client.raknet.on("disconnect", () => this.bridge.disconnect(this));
+      this.player.connection.on("disconnect", () => this.bridge.disconnect(this));
 
       this.on("clientBound-DisconnectPacket" as any, () => this.bridge.disconnect(this));
       this.on("serverBound-DisconnectPacket" as any, () => this.bridge.disconnect(this));
@@ -79,38 +81,41 @@ export class BridgePlayer extends Emitter<BridgePlayerEvents> {
       const hasWildcard = this.listenerCount(wildcard) > 0;
       const hasCompleteWildCard = this.listenerCount(completeWildCard) > 0;
 
-      let cancelled = false;
-      let outBuffer = rawBuffer;
-
-      if (hasSpecific || hasWildcard || hasCompleteWildCard) {
-         let deserialized: any = null;
-         const ctx = {
-            get packet() {
-               if (!deserialized) {
-                  try { deserialized = new PacketClass(Buffer.from(rawBuffer)).deserialize(); }
-                  catch { deserialized = rawBuffer; }
-               }
-               return deserialized;
-            },
-            set packet(v: any) { deserialized = v; },
-            cancelled: false,
-            modified: false,
-         };
-
-         try {
-            if (hasSpecific) this.emit(event, ctx as any);
-            if (hasWildcard) this.emit(wildcard, ctx as any, PacketClass.name);
-            if (hasCompleteWildCard) this.emit(completeWildCard, ctx as any, PacketClass.name);
-         } catch { }
-
-         cancelled = ctx.cancelled;
-         if (ctx.modified && deserialized) {
-            try { outBuffer = deserialized.serialize(); } catch { }
-         }
+      if (!hasSpecific && !hasWildcard && !hasCompleteWildCard) {
+         if (clientBound) this.player.send(rawBuffer);
+         else this.client.send(rawBuffer);
+         return;
       }
 
+      let deserialized: any = null;
+      let cancelled = false;
+      let modified = false;
+
+      const ctx = {
+         get packet() {
+            if (!deserialized) {
+               try { deserialized = new PacketClass(rawBuffer).deserialize(); }
+               catch { deserialized = rawBuffer; }
+            }
+            return deserialized;
+         },
+         set packet(v: any) { 
+            deserialized = v;
+         },
+         get cancelled() { return cancelled; },
+         set cancelled(v: boolean) { cancelled = v; },
+         get modified() { return modified; },
+         set modified(v: boolean) { modified = v; },
+      };
+
+      if (hasSpecific) this.emit(event, ctx as any);
+      if (!cancelled && hasWildcard) this.emit(wildcard, ctx as any, PacketClass.name);
+      if (!cancelled && hasCompleteWildCard) this.emit(completeWildCard, ctx as any, PacketClass.name);
+
       if (cancelled) return;
-      if (clientBound) this.player.send(outBuffer, Priority.High);
-      else this.client.send(outBuffer, Priority.High);
+
+      const outBuffer = modified && deserialized ? deserialized.serialize() : rawBuffer;
+      if (clientBound) this.player.send(outBuffer);
+      else this.client.send(outBuffer);
    }
 }
