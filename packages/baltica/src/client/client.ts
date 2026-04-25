@@ -37,6 +37,24 @@ export class Client extends Emitter<ClientEvents> {
 
    public async connect(): Promise<Client> {
       this.raknet.on("encapsulated", (buf) => this.onEncapsulated(buf));
+      // Without these, baltica is oblivious to raknet-level failures (UDP
+      // stale timeout, server-sent DisconnectionNotification, AlreadyConnected,
+      // IncompatibleProtocolVersion, offlineRetry exhaustion). The raknet
+      // Client now self-closes on those, but baltica still needs to surface
+      // them to its own consumers AND release its own listeners/encryptor
+      // state — otherwise downstream code keeps polling a dead session.
+      this.raknet.on("disconnect", () => {
+         if (this.isDisconnected) return;
+         this.isDisconnected = true;
+         this.emit("disconnect", "raknet disconnected");
+         this.close();
+      });
+      this.raknet.on("error", (err: Error) => {
+         if (this.isDisconnected) return;
+         this.isDisconnected = true;
+         this.emit("disconnect", `raknet error: ${err.message}`);
+         this.close();
+      });
 
       this.registerHandshakeHandlers();
 
@@ -181,12 +199,28 @@ export class Client extends Emitter<ClientEvents> {
       this.on("DisconnectPacket" as PacketNames, (pkt: any) => {
          const reason = pkt?.message?.message ?? pkt?.message ?? "Unknown reason";
          Logger.info(`Disconnected by server: ${reason}`);
+         if (this.isDisconnected) return;
+         this.isDisconnected = true;
          this.emit("disconnect", String(reason));
          this.close();
       });
    }
 
    public close(): void {
+      // Idempotent. Multiple paths can race close(): the new raknet "disconnect"
+      // and "error" listeners in connect(), the DisconnectPacket handler, and
+      // the user-callable disconnect() method. Without the guard we'd double-
+      // remove listeners and (more importantly) call raknet.close() twice —
+      // safe but spammy.
+      if (this.isDisconnected) {
+         try {
+            if (this.raknet && typeof this.raknet.close === "function") {
+               this.raknet.close();
+            }
+         } catch { }
+         return;
+      }
+      this.isDisconnected = true;
       try {
          if (this.raknet && typeof this.raknet.close === "function") {
             this.raknet.close();

@@ -10,6 +10,7 @@ export class Client extends Emitter<ClientEvents> {
    private network: NetworkSession;
    private relay?: Socks5Relay;
    public options: ClientOptions;
+   private closed = false;
 
    constructor(options: Partial<ClientOptions> = {}) {
       super();
@@ -19,16 +20,35 @@ export class Client extends Emitter<ClientEvents> {
       this.network.maxRetransmit = this.options.maxRetransmit;
 
       this.network.on("connect", () => this.emit("connect"));
-      this.network.on("disconnect", () => this.emit("disconnect"));
+      // Server-initiated disconnects (DisconnectionNotification, AlreadyConnected,
+      // stale timeout in tick()) and protocol/connect-timeout errors used to
+      // leak the dgram socket + NetworkSession's recursive keepalive timer
+      // because close() was only ever called from the user-invoked disconnect()
+      // method. Auto-close here so any failure path releases native resources.
+      this.network.on("disconnect", () => {
+         this.emit("disconnect");
+         this.close();
+      });
       this.network.on("encapsulated", (buf) => this.emit("encapsulated", buf));
-      this.network.on("error", (err) => this.emit("error", err));
+      this.network.on("error", (err) => {
+         this.emit("error", err);
+         this.close();
+      });
    }
 
    private bindPromise: Promise<void> | null = null;
 
    private ensureBound(): Promise<void> {
       if (this.bindPromise) return this.bindPromise;
-      this.bindPromise = this.init();
+      // If init() rejects (DNS failure, SOCKS5 handshake failure, dgram bind
+      // failure, etc.) any partially-allocated resources — the relay's TCP
+      // socket and udp socket, the dgram socket if initDirect got far enough —
+      // need to be released. Without this, every failed connect leaks them
+      // plus the NetworkSession keepalive timer that started in the constructor.
+      this.bindPromise = this.init().catch((err) => {
+         this.close();
+         throw err;
+      });
       return this.bindPromise;
    }
 
@@ -95,10 +115,21 @@ export class Client extends Emitter<ClientEvents> {
             clearTimeout(timer);
          };
          const onConnect = () => { cleanup(); resolve(); };
-         const onError = (err: Error) => { cleanup(); reject(err); };
+         const onError = (err: Error) => {
+            cleanup();
+            // network "error" already triggered close() via the constructor
+            // listener; safe to just reject here. Belt-and-braces close() in
+            // case ordering ever changes — close() is idempotent.
+            this.close();
+            reject(err);
+         };
          const timer = setTimeout(() => {
             cleanup();
             this.network.status = Status.Disconnected;
+            // On timeout we have a bound socket + active NetworkSession with a
+            // recursive keepalive timer. Without close() these stay alive in
+            // libuv (socket.ref()) even after the caller drops the Client ref.
+            this.close();
             reject(new Error("Connection timed out"));
          }, this.options.timeout);
 
@@ -117,6 +148,14 @@ export class Client extends Emitter<ClientEvents> {
    }
 
    public close(): void {
+      // Idempotent: callable from any failure path (network "disconnect",
+      // network "error", connect() timeout, init() failure, user disconnect())
+      // without double-destroy. Without this guard, the auto-close listeners
+      // wired in the constructor would re-enter when we set status=Disconnected
+      // below, since destroy() removes all network listeners but the synchronous
+      // emit path can still be in flight on some Emitter implementations.
+      if (this.closed) return;
+      this.closed = true;
       this.network.destroy();
       this.network.status = Status.Disconnected;
       this.network.send = () => {};

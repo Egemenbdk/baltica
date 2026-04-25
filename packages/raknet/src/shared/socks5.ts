@@ -21,13 +21,32 @@ export async function createSocks5Relay(
    family: "udp4" | "udp6" = "udp4"
 ): Promise<Socks5Relay> {
    const tcp = await tcpConnect(proxy.host, proxy.port);
-   await authenticate(tcp, proxy.username, proxy.password);
-   const relay = await udpAssociate(tcp);
+   // From here on any failure must release the TCP socket; otherwise repeated
+   // proxy errors leak a libuv handle per attempt and the process RSS climbs
+   // ~282MB/h with 23 failing accounts retrying every 20s.
+   let relay: { address: string; port: number };
+   try {
+      await authenticate(tcp, proxy.username, proxy.password);
+      relay = await udpAssociate(tcp);
+   } catch (err) {
+      try { tcp.destroy(); } catch {}
+      throw err;
+   }
    const udp = createSocket(family);
 
-   await new Promise<void>((resolve) => {
-      udp.bind(0, () => resolve());
-   });
+   try {
+      await new Promise<void>((resolve, reject) => {
+         const onError = (err: Error) => { udp.off("listening", onListening); reject(err); };
+         const onListening = () => { udp.off("error", onError); resolve(); };
+         udp.once("error", onError);
+         udp.once("listening", onListening);
+         udp.bind(0);
+      });
+   } catch (err) {
+      try { udp.close(); } catch {}
+      try { tcp.destroy(); } catch {}
+      throw err;
+   }
 
    let messageHandler: ((data: Buffer, addr: string, port: number) => void) | null = null;
 
@@ -86,8 +105,19 @@ export async function createSocks5Relay(
 
 function tcpConnect(host: string, port: number): Promise<TcpSocket> {
    return new Promise((resolve, reject) => {
-      const socket = connect(port, host, () => resolve(socket));
-      socket.once("error", reject);
+      const socket = connect(port, host, () => {
+         socket.off("error", onError);
+         resolve(socket);
+      });
+      const onError = (err: Error) => {
+         // node leaves the failed TCP socket in error state but doesn't
+         // release the underlying handle until GC. With repeated proxy
+         // failures these accumulate. destroy() releases the libuv handle
+         // immediately.
+         try { socket.destroy(); } catch {}
+         reject(err);
+      };
+      socket.once("error", onError);
    });
 }
 
